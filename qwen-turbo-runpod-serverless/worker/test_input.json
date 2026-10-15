@@ -1,0 +1,9 @@
+{
+  "input": {
+    "mode": "text",
+    "prompt": "A red cabin beside a misty lake at sunrise",
+    "width": 768,
+    "height": 768,
+    "seed": 42
+  }
+}

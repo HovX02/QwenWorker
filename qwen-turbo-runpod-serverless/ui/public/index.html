@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Qwen Image Studio</title>
+<style>
+:root{color-scheme:dark;--bg:#101216;--panel:#1a1d24;--line:#303541;--text:#f4f5f7;--muted:#a5adba;--accent:#8ab4ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui}main{max-width:900px;margin:auto;padding:24px 16px 50px}
+h1{font-size:30px;margin:0}.muted{color:var(--muted);font-size:13px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:18px;margin-top:14px}
+label{display:block;font-weight:650;margin:12px 0 6px}input,select,textarea,button{font:inherit}input[type=password],input[type=number],select,textarea{width:100%;padding:11px;background:#11141a;color:var(--text);border:1px solid var(--line);border-radius:9px}textarea{min-height:100px}
+.tabs{display:flex;gap:8px;margin:16px 0}.tab{padding:10px 14px;border:1px solid var(--line);border-radius:9px;background:#252a34;color:white}.active{background:#263d61!important}
+.upload{border:1px dashed #657187;padding:15px;border-radius:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.primary,.download{display:block;text-align:center;width:100%;padding:12px;border:0;border-radius:9px;background:var(--accent);color:#101827;font-weight:750;margin-top:16px;cursor:pointer}
+.status{white-space:pre-wrap;color:var(--muted);margin-top:12px;font-size:13px}.preview{display:none;max-width:100%;max-height:520px;margin:12px auto;border-radius:10px}.result{text-align:center;display:none}
+@media(max-width:600px){.grid{grid-template-columns:1fr}.panel{padding:13px}}
+</style></head><body><main>
+<h1>Qwen Image Studio</h1><p class="muted">Text-to-image and image editing. Results are returned to your browser; no permanent gallery.</p>
+<section class="panel">
+<label for="password">Private app password</label><input id="password" type="password" autocomplete="current-password" placeholder="Enter your app password">
+<div class="tabs"><button id="editTab" class="tab active" type="button">Edit photo</button><button id="textTab" class="tab" type="button">Text to image</button></div>
+<div id="uploadArea"><label for="image">Source photo</label><div class="upload"><input id="image" type="file" accept="image/png,image/jpeg,image/webp"><p class="muted">The browser resizes the photo before upload.</p></div><img id="sourcePreview" class="preview" alt="Source photo preview"></div>
+<label for="prompt">Prompt</label><textarea id="prompt" placeholder="Describe what to change in the photo."></textarea>
+<div class="grid"><div><label for="resolution">Resolution</label><select id="resolution"><option value="768">768 × 768 (lower cost)</option><option value="1024" selected>1024 × 1024</option><option value="1280">1280 × 1280 (more VRAM)</option></select></div><div><label for="seed">Seed (-1 = random)</label><input id="seed" type="number" value="-1" min="-1" max="2147483647"></div></div>
+<button id="generate" class="primary" type="button">Generate image</button><div id="status" class="status" role="status"></div>
+</section><section id="result" class="panel result"><h2>Result</h2><img id="resultImage" class="preview" style="display:block" alt="Generated result"><a id="download" class="download" download="qwen-result.png">Download PNG</a></section>
+<p class="muted">Keep the app password private. Do not create sexual content involving minors or intimate/degrading images of real people without their consent.</p>
+</main><script>
+const $=id=>document.getElementById(id);let mode="edit",imageB64=null;
+function setMode(m){mode=m;$("editTab").classList.toggle("active",m==="edit");$("textTab").classList.toggle("active",m==="text");$("uploadArea").style.display=m==="edit"?"block":"none";$("prompt").placeholder=m==="edit"?"Describe what to change in the uploaded photo.":"Describe the image you want to generate."}
+$("editTab").onclick=()=>setMode("edit");$("textTab").onclick=()=>setMode("text");
+function resizeImage(file,maxSide=1536){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(Error("Cannot read file"));reader.onload=()=>{const img=new Image();img.onerror=()=>reject(Error("Unsupported image"));img.onload=()=>{const scale=Math.min(1,maxSide/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext("2d").drawImage(img,0,0,c.width,c.height);resolve(c.toDataURL("image/jpeg",.86))};img.src=reader.result};reader.readAsDataURL(file)})}
+$("image").onchange=async e=>{imageB64=null;const f=e.target.files?.[0];if(!f)return;try{const url=await resizeImage(f);imageB64=url.split(",",2)[1];$("sourcePreview").src=url;$("sourcePreview").style.display="block"}catch(err){$("status").textContent=err.message}};
+async function api(path,options={}){const r=await fetch(path,{...options,headers:{"Content-Type":"application/json","X-App-Password":$("password").value,...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||`Request failed (${r.status})`);return d}
+$("generate").onclick=async()=>{const prompt=$("prompt").value.trim();if(!prompt){$("status").textContent="Enter a prompt first.";return}if(mode==="edit"&&!imageB64){$("status").textContent="Upload a source photo first.";return}
+$("generate").disabled=true;$("result").style.display="none";$("status").textContent="Submitting job. First startup may take several minutes to download model files.";
+try{const size=Number($("resolution").value),seed=Number($("seed").value);const job=await api("/api/run",{method:"POST",body:JSON.stringify({input:{mode,prompt,width:size,height:size,seed,...(mode==="edit"?{image_base64:imageB64}:{})}})});if(!job.id)throw Error(job.error||"RunPod returned no job ID.");
+let state;for(;;){await new Promise(r=>setTimeout(r,2500));state=await api("/api/status/"+encodeURIComponent(job.id));$("status").textContent=`Job status: ${state.status||"queued"}\nKeep this page open while it runs.`;if(["COMPLETED","FAILED","CANCELLED","TIMED_OUT"].includes(state.status))break}
+if(state.status!=="COMPLETED")throw Error(state.error||state.output?.error||`Job ended: ${state.status}`);const out=state.output||{};if(out.error)throw Error(out.error);if(!out.image_base64)throw Error("No image returned.");
+const url=`data:${out.mime_type||"image/png"};base64,${out.image_base64}`;$("resultImage").src=url;$("download").href=url;$("result").style.display="block";$("status").textContent="Done. Download the image before closing the page.";$("result").scrollIntoView({behavior:"smooth"})
+}catch(err){$("status").textContent="Error: "+err.message}finally{$("generate").disabled=false}};
+</script></body></html>
